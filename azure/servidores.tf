@@ -42,7 +42,7 @@ resource "azurerm_linux_virtual_machine" "backend" {
 }
 
 resource "azurerm_linux_virtual_machine" "frontend" {
-  name                            = "vm-${var.proyecto}-frontend"
+  name                            = "vm-${var.proyecto}-frontend-jorgeprueba"
   resource_group_name             = azurerm_resource_group.principal.name
   location                        = azurerm_resource_group.principal.location
   size                            = var.tamano_frontend
