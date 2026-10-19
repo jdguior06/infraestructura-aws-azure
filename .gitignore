@@ -1,0 +1,22 @@
+# Providers descargados
+.terraform/
+
+# Estados locales (el estado del grupo vive en S3 / Azure Storage).
+# El estado de las carpetas bootstrap queda solo en la PC del dueño de la cuenta.
+*.tfstate
+*.tfstate.*
+
+# Valores propios
+*.tfvars
+!*.tfvars.example
+
+# Planes guardados y logs
+*.tfplan
+crash.log
+
+# Claves privadas, por si alguien se equivoca de archivo
+claves/*
+!claves/*.pub
+!claves/LEEME.md
+
+# .terraform.lock.hcl SÍ se sube: fija las versiones de los providers para todo el grupo
