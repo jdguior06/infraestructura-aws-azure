@@ -42,14 +42,14 @@ resource "azurerm_linux_virtual_machine" "backend" {
 }
 
 resource "azurerm_linux_virtual_machine" "frontend" {
-  name                            = "vm-${var.proyecto}-frontend-jorgeprueba"
+  name                            = "vm-${var.proyecto}-frontend"
   resource_group_name             = azurerm_resource_group.principal.name
   location                        = azurerm_resource_group.principal.location
   size                            = var.tamano_frontend
   admin_username                  = var.usuario_admin
   disable_password_authentication = true
   network_interface_ids           = [azurerm_network_interface.frontend.id]
-  tags                            = merge(local.etiquetas, { Rol = "frontend" })
+  tags                            = merge(local.etiquetas, { Rol = "frontend", Prueba = "diego-prueba" })
 
   # Una clave por integrante (archivos .pub de la carpeta claves/).
   dynamic "admin_ssh_key" {
