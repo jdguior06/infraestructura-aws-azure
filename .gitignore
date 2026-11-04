@@ -20,3 +20,7 @@ claves/*
 !claves/LEEME.md
 
 # .terraform.lock.hcl S√ç se sube: fija las versiones de los providers para todo el grupo
+
+# Planes generados para an·lisis
+tfplan
+tfplan.json
