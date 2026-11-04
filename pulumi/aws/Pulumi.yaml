@@ -1,0 +1,44 @@
+# Proyecto Pulumi: la misma infraestructura de aws/ (Terraform), en TypeScript.
+name: asistencia-aws
+description: Frontend (Nginx) y backend (NestJS + PostgreSQL) en AWS
+runtime:
+  name: nodejs
+  options:
+    packagemanager: npm
+
+# Estado compartido del grupo: el mismo bucket que Terraform, en la carpeta pulumi/.
+# Queda en el repo, así nadie tiene que hacer "pulumi login".
+backend:
+  url: s3://tfstate-asistencia-859142233691/pulumi?region=us-east-2
+
+# Valores por defecto (iguales para todos los stacks). Se cambian con "pulumi config set".
+config:
+  aws:region:
+    value: us-east-2
+  proyecto:
+    type: string
+    default: asistencia-pulumi
+  sshPermitido:
+    type: string
+    default: 0.0.0.0/0
+  tipoInstanciaBackend:
+    type: string
+    default: t3.micro
+  tipoInstanciaFrontend:
+    type: string
+    default: t3.micro
+  discoBackendGb:
+    type: integer
+    default: 20
+  puertoBackend:
+    type: integer
+    default: 3000
+  appRepo:
+    type: string
+    default: https://github.com/Jorgito-cc/control-asistencia-academica.git
+  appRama:
+    type: string
+    default: main
+  adminEmail:
+    type: string
+    default: admin@example.com

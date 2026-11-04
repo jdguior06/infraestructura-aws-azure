@@ -1,0 +1,54 @@
+# Proyecto Pulumi: la misma infraestructura de azure/ (Terraform), en TypeScript.
+name: asistencia-azure
+description: Frontend (Nginx) y backend (NestJS + PostgreSQL) en Azure
+runtime:
+  name: nodejs
+  options:
+    packagemanager: npm
+
+# Estado compartido del grupo: el mismo Storage Account que Terraform, en la carpeta pulumi/.
+# Entra con tu "az login" (necesitas el rol Storage Blob Data Contributor).
+backend:
+  url: azblob://tfstate/pulumi?storage_account=sttfstate8f5a458c32
+
+# Valores por defecto (iguales para todos los stacks). Se cambian con "pulumi config set".
+# La suscripción es la de "az account show" (az account set --subscription <ID>).
+config:
+  azure-native:location:
+    value: eastus
+  proyecto:
+    type: string
+    default: asistencia-pulumi
+  sshPermitido:
+    type: string
+    default: "*"
+  usuarioAdmin:
+    type: string
+    default: azureuser
+  tamanoBackend:
+    type: string
+    default: Standard_D2as_v4
+  tamanoFrontend:
+    type: string
+    default: Standard_D2as_v4
+  discoBackendGb:
+    type: integer
+    default: 30
+  puertoBackend:
+    type: integer
+    default: 3000
+  ipPrivadaBackend:
+    type: string
+    default: 10.0.1.10
+  ipPrivadaFrontend:
+    type: string
+    default: 10.0.1.20
+  appRepo:
+    type: string
+    default: https://github.com/Jorgito-cc/control-asistencia-academica.git
+  appRama:
+    type: string
+    default: main
+  adminEmail:
+    type: string
+    default: admin@example.com

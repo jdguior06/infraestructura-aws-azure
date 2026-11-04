@@ -24,3 +24,7 @@ claves/*
 # Planes generados para análisis
 tfplan
 tfplan.json
+
+# Pulumi (TypeScript)
+node_modules/
+bin/
