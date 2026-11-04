@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Asistencia - backend: EC2 Amazon Linux 2023 con PostgreSQL y la API NestJS (cloud-init)."
+
+Parameters:
+  Proyecto:
+    Type: String
+  ImagenAmi:
+    Type: AWS::EC2::Image::Id
+  TipoInstancia:
+    Type: String
+  DiscoGb:
+    Type: Number
+  SubredId:
+    Type: AWS::EC2::Subnet::Id
+  GrupoSeguridadId:
+    Type: AWS::EC2::SecurityGroup::Id
+  PuertoBackend:
+    Type: Number
+  OrigenCors:
+    Type: String
+    Description: "URL publica del frontend (CORS_ORIGIN)."
+  AppRepo:
+    Type: String
+  AppRama:
+    Type: String
+  AdminEmail:
+    Type: String
+  ClavesSsh:
+    Type: String
+    Description: "Claves publicas SSH ya unidas como lista YAML (las arma la plantilla raiz)."
+
+Resources:
+  Servidor:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImagenAmi
+      InstanceType: !Ref TipoInstancia
+      SubnetId: !Ref SubredId
+      SecurityGroupIds: [!Ref GrupoSeguridadId]
+      MetadataOptions:
+        HttpTokens: required # IMDSv2
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref DiscoGb
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-backend" }
+        - { Key: Rol, Value: backend }
+      # Version de cloud-init/amazon-linux/backend.yaml para CloudFormation:
+      # las contrasenas se generan DENTRO del servidor, asi no quedan en git
+      # (el deployment file de Git sync es publico) ni en el UserData.
+      # Cambiar el UserData REEMPLAZA el servidor (y borra la base de datos).
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #cloud-config
+            package_update: true
+            packages:
+              - git
+              - postgresql16-server
+
+            write_files:
+              - path: /etc/asistencia/despliegue.env
+                permissions: "0644"
+                content: |
+                  APP_REPO=${repo_url}
+                  APP_RAMA=${rama}
+
+              # Variables de la API sin secretos; el script agrega las contrasenas.
+              - path: /etc/asistencia/backend.env
+                permissions: "0600"
+                content: |
+                  PORT=${puerto_api}
+                  CORS_ORIGIN=${cors_origin}
+                  DB_HOST=localhost
+                  DB_PORT=5432
+                  DB_USER=asistencia
+                  DB_NAME=modulo2
+                  JWT_EXPIRES_IN=8h
+                  APP_TZ=America/La_Paz
+                  ADMIN_EMAIL=${admin_email}
+                  ADMIN_NAME=Administrador
+
+              - path: /etc/systemd/system/asistencia-api.service
+                permissions: "0644"
+                content: |
+                  [Unit]
+                  Description=API Control de Asistencia (NestJS)
+                  After=network-online.target postgresql.service
+                  Wants=postgresql.service
+
+                  [Service]
+                  User=asistencia
+                  WorkingDirectory=/opt/asistencia/app/server
+                  Environment=NODE_ENV=production
+                  ExecStart=/usr/bin/node dist/main.js
+                  Restart=always
+                  RestartSec=5
+
+                  [Install]
+                  WantedBy=multi-user.target
+
+              - path: /usr/local/bin/desplegar-backend.sh
+                permissions: "0755"
+                content: |
+                  #!/bin/bash
+                  set -euxo pipefail
+                  export HOME=/root
+                  cd /tmp
+
+                  # 1. Swap si hay poca memoria (t3.micro tiene 1 GB; la compilacion lo necesita).
+                  MEMORIA_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+                  if [ "$MEMORIA_KB" -lt 3000000 ] && [ ! -f /swapfile ]; then
+                    dd if=/dev/zero of=/swapfile bs=1M count=2048
+                    chmod 600 /swapfile
+                    mkswap /swapfile
+                    swapon /swapfile
+                    echo "/swapfile none swap sw 0 0" >> /etc/fstab
+                  fi
+
+                  # 2. Node.js 22.
+                  curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+                  dnf install -y nodejs
+
+                  # 3. PostgreSQL: pedir contrasena en las conexiones TCP (localhost).
+                  postgresql-setup --initdb
+                  sed -i -E 's/^(host\s.*)ident$/\1scram-sha-256/' /var/lib/pgsql/data/pg_hba.conf
+                  systemctl enable --now postgresql
+
+                  # 4. Contrasenas generadas aqui (sin "set -x" para que no salgan en los logs).
+                  set +x
+                  DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+                  JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+                  ADMIN_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
+                  {
+                    echo "DB_PASSWORD=$DB_PASSWORD"
+                    echo "JWT_SECRET=$JWT_SECRET"
+                    echo "ADMIN_PASSWORD=$ADMIN_PASSWORD"
+                  } >> /etc/asistencia/backend.env
+
+                  # 5. Usuario y base de datos de la app.
+                  set -a
+                  . /etc/asistencia/despliegue.env
+                  . /etc/asistencia/backend.env
+                  set +a
+                  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER $DB_USER PASSWORD '$DB_PASSWORD';"
+                  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
+                  set -x
+
+                  # 6. Codigo de la app, con un usuario propio (no root).
+                  useradd --system --create-home --home-dir /opt/asistencia --shell /sbin/nologin asistencia
+                  git clone --depth 1 --branch "$APP_RAMA" "$APP_REPO" /opt/asistencia/app
+                  cp /etc/asistencia/backend.env /opt/asistencia/app/server/.env
+                  chown -R asistencia:asistencia /opt/asistencia
+                  chmod 600 /opt/asistencia/app/server/.env
+
+                  # 7. Dependencias (con las de desarrollo: migration:run usa ts-node), compilar y migrar.
+                  cd /opt/asistencia/app/server
+                  export NODE_OPTIONS=--max-old-space-size=1536
+                  sudo -u asistencia -H --preserve-env=NODE_OPTIONS npm ci
+                  sudo -u asistencia -H --preserve-env=NODE_OPTIONS npm run build
+                  sudo -u asistencia -H npm run migration:run
+
+                  # 8. Arrancar la API. El administrador inicial se crea al primer arranque.
+                  systemctl daemon-reload
+                  systemctl enable --now asistencia-api
+
+            runcmd:
+              - /usr/local/bin/desplegar-backend.sh
+
+            ssh_authorized_keys:
+              ${claves}
+          - repo_url: !Ref AppRepo
+            rama: !Ref AppRama
+            puerto_api: !Ref PuertoBackend
+            cors_origin: !Ref OrigenCors
+            admin_email: !Ref AdminEmail
+            claves: !Ref ClavesSsh
+
+Outputs:
+  InstanciaId:
+    Value: !Ref Servidor
+  IpPrivada:
+    Value: !GetAtt Servidor.PrivateIp
+  IpPublica:
+    Value: !GetAtt Servidor.PublicIp

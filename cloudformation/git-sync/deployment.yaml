@@ -1,0 +1,26 @@
+# CloudFormation Git sync vigila este archivo y plantillas/main.yaml en la rama main.
+# Cualquier commit que cambie uno de los dos actualiza el stack.
+template-file-path: cloudformation/plantillas/main.yaml
+
+parameters:
+  Proyecto: asistencia-cfn
+  # Bucket del grupo (el mismo del estado de Terraform), carpeta cloudformation/.
+  BucketPlantillas: tfstate-asistencia-859142233691
+  # La escribe scripts/publicar-anidadas.ps1. No la edites a mano.
+  VersionPlantillas: "0695eff515bb"
+  # Amazon Linux 2023 fijada. La escribe el script la primera vez; para actualizarla: -ActualizarAmi.
+  ImagenAmi: "ami-02dae70ab25064279"
+  TipoInstanciaBackend: t3.micro
+  TipoInstanciaFrontend: t3.micro
+  DiscoBackendGb: "20"
+  PuertoBackend: "3000"
+  CidrSsh: 0.0.0.0/0
+  # Claves públicas de claves/, separadas por coma (no son secretas).
+  ClavesSsh: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEGmiBVmCCz7QcH9bXWxAzObD597yFcg1DM4L82tGey4 diego-iac"
+  AppRepo: https://github.com/Jorgito-cc/control-asistencia-academica.git
+  AppRama: main
+  AdminEmail: admin@example.com
+
+tags:
+  Proyecto: asistencia-cfn
+  Gestionado: cloudformation-git-sync

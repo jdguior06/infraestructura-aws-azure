@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Asistencia - frontend: EC2 Amazon Linux 2023 con React (Vite) y Nginx (cloud-init)."
+
+Parameters:
+  Proyecto:
+    Type: String
+  ImagenAmi:
+    Type: AWS::EC2::Image::Id
+  TipoInstancia:
+    Type: String
+  SubredId:
+    Type: AWS::EC2::Subnet::Id
+  GrupoSeguridadId:
+    Type: AWS::EC2::SecurityGroup::Id
+  IpFrontendAllocationId:
+    Type: String
+    Description: "IP fija creada en la plantilla de red."
+  IpBackend:
+    Type: String
+    Description: "IP privada del backend (Nginx reenvia /api ahi)."
+  PuertoBackend:
+    Type: Number
+  AppRepo:
+    Type: String
+  AppRama:
+    Type: String
+  ClavesSsh:
+    Type: String
+    Description: "Claves publicas SSH ya unidas como lista YAML (las arma la plantilla raiz)."
+
+Resources:
+  Servidor:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImagenAmi
+      InstanceType: !Ref TipoInstancia
+      SubnetId: !Ref SubredId
+      SecurityGroupIds: [!Ref GrupoSeguridadId]
+      MetadataOptions:
+        HttpTokens: required # IMDSv2
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-frontend" }
+        - { Key: Rol, Value: frontend }
+      # Mismo contenido que cloud-init/amazon-linux/frontend.yaml.
+      # Cambiar el UserData REEMPLAZA el servidor.
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #cloud-config
+            package_update: true
+            packages:
+              - git
+              - nginx
+
+            write_files:
+              - path: /etc/asistencia/despliegue.env
+                permissions: "0644"
+                content: |
+                  APP_REPO=${repo_url}
+                  APP_RAMA=${rama}
+
+              # Nginx sirve la app y reenvía /api (y el WebSocket /api/socket.io) al backend por la red privada.
+              - path: /etc/asistencia/nginx-app.conf
+                permissions: "0644"
+                content: |
+                  map $http_upgrade $connection_upgrade {
+                    default upgrade;
+                    ''      close;
+                  }
+
+                  server {
+                    listen 80 default_server;
+                    listen [::]:80 default_server;
+                    server_name _;
+
+                    root /var/www/asistencia;
+                    index index.html;
+                    client_max_body_size 20m;
+
+                    location / {
+                      try_files $uri $uri/ /index.html;
+                    }
+
+                    location /api/ {
+                      proxy_pass http://${ip_backend}:${puerto_api};
+                      proxy_http_version 1.1;
+                      proxy_set_header Upgrade $http_upgrade;
+                      proxy_set_header Connection $connection_upgrade;
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
+                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                      proxy_read_timeout 300s;
+                    }
+                  }
+
+              - path: /usr/local/bin/desplegar-frontend.sh
+                permissions: "0755"
+                content: |
+                  #!/bin/bash
+                  set -euxo pipefail
+                  export HOME=/root
+                  cd /tmp
+
+                  # 1. Swap si hay poca memoria (t3.micro tiene 1 GB; la compilación lo necesita).
+                  MEMORIA_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+                  if [ "$MEMORIA_KB" -lt 3000000 ] && [ ! -f /swapfile ]; then
+                    dd if=/dev/zero of=/swapfile bs=1M count=2048
+                    chmod 600 /swapfile
+                    mkswap /swapfile
+                    swapon /swapfile
+                    echo "/swapfile none swap sw 0 0" >> /etc/fstab
+                  fi
+
+                  # 2. Node.js 22 (solo para compilar).
+                  curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+                  dnf install -y nodejs
+
+                  # 3. Código de la app, con un usuario propio (no root).
+                  set -a
+                  . /etc/asistencia/despliegue.env
+                  set +a
+                  useradd --system --create-home --home-dir /opt/asistencia --shell /sbin/nologin asistencia
+                  git clone --depth 1 --branch "$APP_RAMA" "$APP_REPO" /opt/asistencia/app
+                  echo "VITE_API_URL=/api" > /opt/asistencia/app/client/.env
+                  chown -R asistencia:asistencia /opt/asistencia
+
+                  # 4. Compilar.
+                  cd /opt/asistencia/app/client
+                  export NODE_OPTIONS=--max-old-space-size=1536
+                  sudo -u asistencia -H --preserve-env=NODE_OPTIONS npm ci
+                  sudo -u asistencia -H --preserve-env=NODE_OPTIONS npm run build
+
+                  # 5. Publicar en Nginx.
+                  mkdir -p /var/www/asistencia
+                  cp -r dist/. /var/www/asistencia/
+                  chmod -R a+rX /var/www/asistencia
+                  cp /etc/asistencia/nginx-app.conf /etc/nginx/conf.d/asistencia.conf
+                  # El nginx.conf de Amazon Linux trae su propio servidor en el puerto 80: que el nuestro sea el principal.
+                  sed -i 's/ default_server//g' /etc/nginx/nginx.conf
+                  nginx -t
+                  systemctl enable nginx
+                  systemctl restart nginx
+
+            runcmd:
+              - /usr/local/bin/desplegar-frontend.sh
+
+            ssh_authorized_keys:
+              ${claves}
+
+          - repo_url: !Ref AppRepo
+            rama: !Ref AppRama
+            ip_backend: !Ref IpBackend
+            puerto_api: !Ref PuertoBackend
+            claves: !Ref ClavesSsh
+
+  AsociacionIpFrontend:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref Servidor
+      AllocationId: !Ref IpFrontendAllocationId
+
+Outputs:
+  InstanciaId:
+    Value: !Ref Servidor

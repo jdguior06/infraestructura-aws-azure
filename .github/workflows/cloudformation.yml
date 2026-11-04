@@ -1,0 +1,21 @@
+# Revisa cada PR y cada push a main que toque CloudFormation o las claves SSH.
+# No usa credenciales de AWS: el despliegue lo hace CloudFormation Git sync.
+name: CloudFormation
+
+on:
+  pull_request:
+    paths: ["cloudformation/**", "claves/**", ".github/workflows/cloudformation.yml"]
+  push:
+    branches: [main]
+    paths: ["cloudformation/**", "claves/**", ".github/workflows/cloudformation.yml"]
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cfn-lint
+      - run: bash cloudformation/scripts/verificar.sh

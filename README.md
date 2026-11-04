@@ -7,6 +7,7 @@ infra-grupo/
 ├── claves/              claves públicas SSH de cada integrante (*.pub)
 ├── cloud-init/          despliegue de la app en el primer arranque (ver cloud-init/LEEME.md)
 ├── pulumi/              la misma infraestructura con Pulumi en TypeScript (ver pulumi/LEEME.md)
+├── cloudformation/      la misma infraestructura en CloudFormation con Git sync (ver cloudformation/LEEME.md)
 │   ├── amazon-linux/    backend.yaml · frontend.yaml  (AWS)
 │   └── ubuntu/          backend.yaml · frontend.yaml  (Azure)
 ├── aws/                 (azure/ tiene los mismos archivos)

@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Asistencia - plantilla raiz (Git sync): red, seguridad, backend y frontend como stacks anidados."
+
+# Git sync vigila este archivo y git-sync/deployment.yaml. Los valores reales
+# de estos parametros estan en deployment.yaml (no en los Default).
+
+Parameters:
+  Proyecto:
+    Type: String
+    Default: asistencia-cfn
+    AllowedPattern: "^[a-z][a-z0-9-]{2,28}$"
+  BucketPlantillas:
+    Type: String
+    Description: "Bucket S3 privado (misma region) con las plantillas anidadas."
+  VersionPlantillas:
+    Type: String
+    AllowedPattern: "^[0-9a-f]{12}$"
+    Description: "Carpeta de la version publicada (la calcula scripts/publicar-anidadas.ps1)."
+  ImagenAmi:
+    Type: AWS::EC2::Image::Id
+    Description: "AMI de Amazon Linux 2023 fijada a proposito: si cambia, se recrean los servidores."
+  TipoInstanciaBackend:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small] # reemplaza la politica .rego de tamanos
+  TipoInstanciaFrontend:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small]
+  DiscoBackendGb:
+    Type: Number
+    Default: 20
+    MinValue: 8
+    MaxValue: 50
+  PuertoBackend:
+    Type: Number
+    Default: 3000
+  CidrSsh:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: "^\\d{1,3}(\\.\\d{1,3}){3}/\\d{1,2}$"
+    Description: "Desde donde se permite SSH. Para restringirlo usa tu IP con /32."
+  ClavesSsh:
+    Type: CommaDelimitedList
+    Description: "Claves publicas SSH del grupo (las de claves/), separadas por coma."
+  AppRepo:
+    Type: String
+    Default: https://github.com/Jorgito-cc/control-asistencia-academica.git
+  AppRama:
+    Type: String
+    Default: main
+  AdminEmail:
+    Type: String
+    Default: admin@example.com
+
+Resources:
+  RedStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${BucketPlantillas}.s3.${AWS::Region}.${AWS::URLSuffix}/cloudformation/${VersionPlantillas}/red.yaml"
+      Parameters:
+        Proyecto: !Ref Proyecto
+
+  SeguridadStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${BucketPlantillas}.s3.${AWS::Region}.${AWS::URLSuffix}/cloudformation/${VersionPlantillas}/seguridad.yaml"
+      Parameters:
+        Proyecto: !Ref Proyecto
+        VpcId: !GetAtt RedStack.Outputs.VpcId
+        CidrSsh: !Ref CidrSsh
+        PuertoBackend: !Ref PuertoBackend
+
+  BackendStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${BucketPlantillas}.s3.${AWS::Region}.${AWS::URLSuffix}/cloudformation/${VersionPlantillas}/backend.yaml"
+      Parameters:
+        Proyecto: !Ref Proyecto
+        ImagenAmi: !Ref ImagenAmi
+        TipoInstancia: !Ref TipoInstanciaBackend
+        DiscoGb: !Ref DiscoBackendGb
+        SubredId: !GetAtt RedStack.Outputs.SubredId
+        GrupoSeguridadId: !GetAtt SeguridadStack.Outputs.GrupoBackendId
+        PuertoBackend: !Ref PuertoBackend
+        OrigenCors: !Sub
+          - "http://${Ip}"
+          - Ip: !GetAtt RedStack.Outputs.IpFrontend
+        AppRepo: !Ref AppRepo
+        AppRama: !Ref AppRama
+        AdminEmail: !Ref AdminEmail
+        # Lista YAML para cloud-init: "- clave1\n  - clave2"
+        ClavesSsh: !Join ["", ["- ", !Join ["\n  - ", !Ref ClavesSsh]]]
+
+  FrontendStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${BucketPlantillas}.s3.${AWS::Region}.${AWS::URLSuffix}/cloudformation/${VersionPlantillas}/frontend.yaml"
+      Parameters:
+        Proyecto: !Ref Proyecto
+        ImagenAmi: !Ref ImagenAmi
+        TipoInstancia: !Ref TipoInstanciaFrontend
+        SubredId: !GetAtt RedStack.Outputs.SubredId
+        GrupoSeguridadId: !GetAtt SeguridadStack.Outputs.GrupoFrontendId
+        IpFrontendAllocationId: !GetAtt RedStack.Outputs.IpFrontendAllocationId
+        IpBackend: !GetAtt BackendStack.Outputs.IpPrivada
+        PuertoBackend: !Ref PuertoBackend
+        AppRepo: !Ref AppRepo
+        AppRama: !Ref AppRama
+        ClavesSsh: !Join ["", ["- ", !Join ["\n  - ", !Ref ClavesSsh]]]
+
+Outputs:
+  UrlApp:
+    Value: !Sub
+      - "http://${Ip}"
+      - Ip: !GetAtt RedStack.Outputs.IpFrontend
+  FrontendIpPublica:
+    Value: !GetAtt RedStack.Outputs.IpFrontend
+  BackendIpPublica:
+    Description: "Solo para SSH. Cambia si el servidor se detiene."
+    Value: !GetAtt BackendStack.Outputs.IpPublica
+  BackendIpPrivada:
+    Value: !GetAtt BackendStack.Outputs.IpPrivada
+  SshFrontend:
+    Value: !Sub
+      - "ssh -i ~/.ssh/id_ed25519 ec2-user@${Ip}"
+      - Ip: !GetAtt RedStack.Outputs.IpFrontend
+  SshBackend:
+    Value: !Sub
+      - "ssh -i ~/.ssh/id_ed25519 ec2-user@${Ip}"
+      - Ip: !GetAtt BackendStack.Outputs.IpPublica
+  AdminCorreo:
+    Value: !Ref AdminEmail
+  VerContrasenaAdmin:
+    Description: "La contrasena se genera dentro del backend: ejecuta esto por SSH en el backend."
+    Value: "sudo grep ADMIN_PASSWORD /etc/asistencia/backend.env"
+  VerDespliegue:
+    Value: "cloud-init status --wait; sudo tail -n 50 /var/log/cloud-init-output.log"

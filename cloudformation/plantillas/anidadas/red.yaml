@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Asistencia - red: VPC, subred publica, salida a internet e IP fija del frontend."
+
+Parameters:
+  Proyecto:
+    Type: String
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-vpc" }
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-igw" }
+
+  VinculoInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  SubredPublica:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-subred-publica" }
+
+  TablaRutasPublica:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-rt-publica" }
+
+  RutaInternet:
+    Type: AWS::EC2::Route
+    DependsOn: VinculoInternetGateway
+    Properties:
+      RouteTableId: !Ref TablaRutasPublica
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  AsociacionRutaPublica:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubredPublica
+      RouteTableId: !Ref TablaRutasPublica
+
+  # IP fija del frontend. Se crea aqui, antes que los servidores, porque el
+  # backend la necesita (CORS_ORIGIN); el frontend la asocia despues.
+  IpFrontend:
+    Type: AWS::EC2::EIP
+    DependsOn: VinculoInternetGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-ip-frontend" }
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+  SubredId:
+    Value: !Ref SubredPublica
+  IpFrontend:
+    Value: !Ref IpFrontend
+  IpFrontendAllocationId:
+    Value: !GetAtt IpFrontend.AllocationId

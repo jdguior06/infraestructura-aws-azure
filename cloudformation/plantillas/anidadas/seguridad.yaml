@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Asistencia - seguridad: firewalls de frontend y backend."
+
+Parameters:
+  Proyecto:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  CidrSsh:
+    Type: String
+    Description: "Desde donde se permite SSH. 0.0.0.0/0 para la practica; tu IP/32 para restringirlo."
+  PuertoBackend:
+    Type: Number
+
+Resources:
+  # Frontend: web abierta a internet, SSH segun CidrSsh. La salida es libre por defecto.
+  GrupoFrontend:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${Proyecto}-sg-frontend"
+      GroupDescription: "Web publica y SSH"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: "HTTP desde internet" }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: "HTTPS desde internet" }
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref CidrSsh, Description: "SSH segun CidrSsh" }
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-sg-frontend" }
+
+  # Backend: la API solo acepta trafico del frontend; PostgreSQL no se expone.
+  GrupoBackend:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${Proyecto}-sg-backend"
+      GroupDescription: "API solo desde el frontend y SSH"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref PuertoBackend
+          ToPort: !Ref PuertoBackend
+          SourceSecurityGroupId: !Ref GrupoFrontend
+          Description: "API desde el servidor frontend"
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref CidrSsh, Description: "SSH segun CidrSsh" }
+      Tags:
+        - { Key: Name, Value: !Sub "${Proyecto}-sg-backend" }
+
+Outputs:
+  GrupoFrontendId:
+    Value: !GetAtt GrupoFrontend.GroupId
+  GrupoBackendId:
+    Value: !GetAtt GrupoBackend.GroupId
