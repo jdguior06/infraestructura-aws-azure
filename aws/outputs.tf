@@ -26,3 +26,19 @@ output "ssh_frontend" {
 output "ssh_backend" {
   value = "ssh -i ~/.ssh/id_ed25519 ec2-user@${aws_instance.backend.public_ip}"
 }
+
+output "admin_email" {
+  description = "Usuario administrador de la app."
+  value       = var.admin_email
+}
+
+output "admin_password" {
+  description = "Ver con: terraform output -raw admin_password"
+  value       = random_password.admin.result
+  sensitive   = true
+}
+
+output "ver_despliegue" {
+  description = "cloud-init tarda unos minutos después del apply. Revisa el avance con este comando dentro de cada servidor."
+  value       = "cloud-init status --wait; sudo tail -n 50 /var/log/cloud-init-output.log"
+}

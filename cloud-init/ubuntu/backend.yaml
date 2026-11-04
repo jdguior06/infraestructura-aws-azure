@@ -1,0 +1,116 @@
+#cloud-config
+# Backend en Ubuntu 24.04: NestJS + PostgreSQL 16.
+# Se ejecuta una sola vez, en el primer arranque de la VM.
+#
+# Variables de plantilla (las reemplaza Terraform, Pulumi o CloudFormation):
+#   repo_url, rama, puerto_api, cors_origin, db_password, jwt_secret,
+#   admin_email, admin_password
+#
+# Regla para que este archivo sirva con cualquier herramienta:
+# en bash se usa $VARIABLE, nunca con llaves.
+
+package_update: true
+packages:
+  - git
+  - postgresql
+
+write_files:
+  # Datos del despliegue: qué repositorio y qué rama clonar.
+  - path: /etc/asistencia/despliegue.env
+    permissions: "0644"
+    content: |
+      APP_REPO=${repo_url}
+      APP_RAMA=${rama}
+
+  # Variables de entorno de la API (el .env de server/).
+  - path: /etc/asistencia/backend.env
+    permissions: "0600"
+    content: |
+      PORT=${puerto_api}
+      CORS_ORIGIN=${cors_origin}
+      DB_HOST=localhost
+      DB_PORT=5432
+      DB_USER=asistencia
+      DB_PASSWORD=${db_password}
+      DB_NAME=modulo2
+      JWT_SECRET=${jwt_secret}
+      JWT_EXPIRES_IN=8h
+      APP_TZ=America/La_Paz
+      ADMIN_EMAIL=${admin_email}
+      ADMIN_PASSWORD=${admin_password}
+      ADMIN_NAME=Administrador
+
+  # Servicio que mantiene la API corriendo (reemplaza a PM2).
+  - path: /etc/systemd/system/asistencia-api.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=API Control de Asistencia (NestJS)
+      After=network-online.target postgresql.service
+      Wants=postgresql.service
+
+      [Service]
+      User=asistencia
+      WorkingDirectory=/opt/asistencia/app/server
+      Environment=NODE_ENV=production
+      ExecStart=/usr/bin/node dist/main.js
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/bin/desplegar-backend.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euxo pipefail
+      export HOME=/root
+      cd /tmp
+
+      # 1. Swap si hay poca memoria (Standard_B2ats_v2 tiene 1 GB).
+      MEMORIA_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+      if [ "$MEMORIA_KB" -lt 3000000 ] && [ ! -f /swapfile ]; then
+        dd if=/dev/zero of=/swapfile bs=1M count=2048
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        echo "/swapfile none swap sw 0 0" >> /etc/fstab
+      fi
+
+      # 2. Node.js 22 (espera si apt está ocupado con actualizaciones automáticas).
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+      apt-get -o DPkg::Lock::Timeout=600 install -y nodejs
+
+      # 3. PostgreSQL: en Ubuntu ya queda iniciado y localhost ya pide contraseña
+      #    (scram-sha-256). No hace falta tocar pg_hba.conf.
+      systemctl enable --now postgresql
+
+      # 4. Usuario y base de datos de la app.
+      set -a
+      . /etc/asistencia/despliegue.env
+      . /etc/asistencia/backend.env
+      set +a
+      sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER $DB_USER PASSWORD '$DB_PASSWORD';"
+      sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
+
+      # 5. Código de la app, con un usuario propio (no root).
+      useradd --system --create-home --home-dir /opt/asistencia --shell /sbin/nologin asistencia
+      git clone --depth 1 --branch "$APP_RAMA" "$APP_REPO" /opt/asistencia/app
+      cp /etc/asistencia/backend.env /opt/asistencia/app/server/.env
+      chown -R asistencia:asistencia /opt/asistencia
+      chmod 600 /opt/asistencia/app/server/.env
+
+      # 6. Dependencias (con las de desarrollo: migration:run usa ts-node), compilar y migrar.
+      cd /opt/asistencia/app/server
+      export NODE_OPTIONS=--max-old-space-size=1536
+      sudo -u asistencia -H --preserve-env=NODE_OPTIONS npm ci
+      sudo -u asistencia -H --preserve-env=NODE_OPTIONS npm run build
+      sudo -u asistencia -H npm run migration:run
+
+      # 7. Arrancar la API. El administrador inicial se crea al primer arranque.
+      systemctl daemon-reload
+      systemctl enable --now asistencia-api
+
+runcmd:
+  - /usr/local/bin/desplegar-backend.sh

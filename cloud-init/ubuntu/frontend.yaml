@@ -1,0 +1,106 @@
+#cloud-config
+# Frontend en Ubuntu 24.04: React (Vite) compilado y servido con Nginx.
+# Se ejecuta una sola vez, en el primer arranque de la VM.
+#
+# Variables de plantilla (las reemplaza Terraform, Pulumi o CloudFormation):
+#   repo_url, rama, ip_backend, puerto_api
+#
+# Regla para que este archivo sirva con cualquier herramienta:
+# en bash se usa $VARIABLE, nunca con llaves.
+
+package_update: true
+packages:
+  - git
+  - nginx
+
+write_files:
+  - path: /etc/asistencia/despliegue.env
+    permissions: "0644"
+    content: |
+      APP_REPO=${repo_url}
+      APP_RAMA=${rama}
+
+  # Nginx sirve la app y reenvía /api (y el WebSocket /api/socket.io) al backend por la red privada.
+  - path: /etc/asistencia/nginx-app.conf
+    permissions: "0644"
+    content: |
+      map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ''      close;
+      }
+
+      server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        server_name _;
+
+        root /var/www/asistencia;
+        index index.html;
+        client_max_body_size 20m;
+
+        location / {
+          try_files $uri $uri/ /index.html;
+        }
+
+        location /api/ {
+          proxy_pass http://${ip_backend}:${puerto_api};
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_read_timeout 300s;
+        }
+      }
+
+  - path: /usr/local/bin/desplegar-frontend.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euxo pipefail
+      export HOME=/root
+      cd /tmp
+
+      # 1. Swap si hay poca memoria (Standard_B2ats_v2 tiene 1 GB).
+      MEMORIA_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+      if [ "$MEMORIA_KB" -lt 3000000 ] && [ ! -f /swapfile ]; then
+        dd if=/dev/zero of=/swapfile bs=1M count=2048
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        echo "/swapfile none swap sw 0 0" >> /etc/fstab
+      fi
+
+      # 2. Node.js 22 (solo para compilar).
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+      apt-get -o DPkg::Lock::Timeout=600 install -y nodejs
+
+      # 3. Código de la app, con un usuario propio (no root).
+      set -a
+      . /etc/asistencia/despliegue.env
+      set +a
+      useradd --system --create-home --home-dir /opt/asistencia --shell /sbin/nologin asistencia
+      git clone --depth 1 --branch "$APP_RAMA" "$APP_REPO" /opt/asistencia/app
+      echo "VITE_API_URL=/api" > /opt/asistencia/app/client/.env
+      chown -R asistencia:asistencia /opt/asistencia
+
+      # 4. Compilar.
+      cd /opt/asistencia/app/client
+      export NODE_OPTIONS=--max-old-space-size=1536
+      sudo -u asistencia -H --preserve-env=NODE_OPTIONS npm ci
+      sudo -u asistencia -H --preserve-env=NODE_OPTIONS npm run build
+
+      # 5. Publicar en Nginx.
+      mkdir -p /var/www/asistencia
+      cp -r dist/. /var/www/asistencia/
+      chmod -R a+rX /var/www/asistencia
+      cp /etc/asistencia/nginx-app.conf /etc/nginx/conf.d/asistencia.conf
+      # Ubuntu trae un sitio de ejemplo en el puerto 80: se quita para que el nuestro sea el principal.
+      rm -f /etc/nginx/sites-enabled/default
+      nginx -t
+      systemctl enable nginx
+      systemctl restart nginx
+
+runcmd:
+  - /usr/local/bin/desplegar-frontend.sh

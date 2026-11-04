@@ -5,6 +5,9 @@ Dos integrantes administran **la misma infraestructura** desde sus PCs. El códi
 ```
 infra-grupo/
 ├── claves/              claves públicas SSH de cada integrante (*.pub)
+├── cloud-init/          despliegue de la app en el primer arranque (ver cloud-init/LEEME.md)
+│   ├── amazon-linux/    backend.yaml · frontend.yaml  (AWS)
+│   └── ubuntu/          backend.yaml · frontend.yaml  (Azure)
 ├── aws/                 (azure/ tiene los mismos archivos)
 │   ├── bootstrap/       crea el lugar del estado, una sola vez
 │   │   ├── versions.tf
@@ -19,6 +22,7 @@ infra-grupo/
 │   ├── red.tf           red, subred, IPs
 │   ├── seguridad.tf     firewalls de frontend y backend
 │   ├── servidores.tf    las dos máquinas
+│   ├── aplicacion.tf    contraseñas generadas y cloud-init de cada máquina
 │   └── outputs.tf       IPs, URL y comandos SSH
 ```
 
@@ -160,6 +164,18 @@ terraform output ssh_backend
 ```
 
 Copia el comando que aparece y ejecútalo. La primera vez responde `yes` a la pregunta de confianza. El usuario es `ec2-user` en AWS y `azureuser` en Azure.
+
+**Ver la app desplegada**
+
+cloud-init sigue trabajando dentro de las máquinas unos 5-10 minutos después del `apply`. Cuando termine:
+
+```powershell
+terraform output url_app                 # abrir en el navegador
+terraform output admin_email
+terraform output -raw admin_password     # contraseña del administrador inicial
+```
+
+Si la página no carga, entra por SSH y revisa `cloud-init status --wait` y `/var/log/cloud-init-output.log`. Detalles en `cloud-init/LEEME.md`.
 
 ---
 

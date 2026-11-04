@@ -10,6 +10,10 @@ resource "azurerm_linux_virtual_machine" "backend" {
   network_interface_ids           = [azurerm_network_interface.backend.id]
   tags                            = merge(local.etiquetas, { Rol = "backend" })
 
+  # cloud-init instala PostgreSQL y despliega la API (ver cloud-init/ubuntu/).
+  # Solo corre en el primer arranque: si cambia, Azure recrea la VM.
+  custom_data = local.custom_data_backend
+
   # Una clave por integrante (archivos .pub de la carpeta claves/).
   dynamic "admin_ssh_key" {
     for_each = local.claves_ssh
@@ -50,6 +54,9 @@ resource "azurerm_linux_virtual_machine" "frontend" {
   disable_password_authentication = true
   network_interface_ids           = [azurerm_network_interface.frontend.id]
   tags                            = merge(local.etiquetas, { Rol = "frontend", Prueba = "diego-prueba" })
+
+  # cloud-init compila el frontend y configura Nginx (ver cloud-init/ubuntu/).
+  custom_data = local.custom_data_frontend
 
   # Una clave por integrante (archivos .pub de la carpeta claves/).
   dynamic "admin_ssh_key" {

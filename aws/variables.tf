@@ -46,3 +46,21 @@ variable "puerto_backend" {
   type        = number
   default     = 3000
 }
+
+variable "app_repo" {
+  description = "Repositorio público de la app que clona cloud-init."
+  type        = string
+  default     = "https://github.com/Jorgito-cc/control-asistencia-academica.git"
+}
+
+variable "app_rama" {
+  description = "Rama del repositorio de la app que se despliega."
+  type        = string
+  default     = "main"
+}
+
+variable "admin_email" {
+  description = "Correo del administrador inicial de la app (la contraseña la genera Terraform)."
+  type        = string
+  default     = "admin@example.com"
+}
