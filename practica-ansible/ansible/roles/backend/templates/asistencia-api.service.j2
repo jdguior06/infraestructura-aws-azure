@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+[Unit]
+Description=API Control de Asistencia (NestJS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ app_usuario }}
+WorkingDirectory={{ app_dir }}/server
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

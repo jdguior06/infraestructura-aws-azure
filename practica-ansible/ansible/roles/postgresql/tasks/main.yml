@@ -1,0 +1,87 @@
+# PostgreSQL en su propio servidor: escucha en la red privada y solo acepta al backend.
+
+- name: Rutas y paquetes según el sistema
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+- name: Instalar PostgreSQL (Ubuntu)
+  ansible.builtin.apt:
+    name: "{{ postgresql_paquetes }}"
+    state: present
+    lock_timeout: 600
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Instalar PostgreSQL (Amazon Linux)
+  ansible.builtin.dnf:
+    name: "{{ postgresql_paquetes }}"
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Crear la base inicial (solo Amazon Linux; Ubuntu ya la trae)
+  ansible.builtin.command: postgresql-setup --initdb
+  args:
+    creates: /var/lib/pgsql/data/PG_VERSION
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Buscar la carpeta de configuración (Ubuntu)
+  when: ansible_facts['os_family'] == 'Debian'
+  block:
+    - name: Versión instalada en /etc/postgresql
+      ansible.builtin.find:
+        paths: /etc/postgresql
+        file_type: directory
+      register: postgresql_versiones
+
+    - name: Rutas de postgresql.conf y pg_hba.conf
+      ansible.builtin.set_fact:
+        postgresql_conf: "{{ carpeta }}/main/postgresql.conf"
+        postgresql_hba: "{{ carpeta }}/main/pg_hba.conf"
+      vars:
+        carpeta: "{{ (postgresql_versiones.files | map(attribute='path') | sort | last) }}"
+
+# Por defecto solo escucha en localhost. El firewall de la nube ya limita quién llega al 5432.
+- name: Escuchar también en la red privada
+  ansible.builtin.lineinfile:
+    path: "{{ postgresql_conf }}"
+    regexp: '^#?\s*listen_addresses\s*='
+    line: "listen_addresses = '*'"
+  notify: Reiniciar PostgreSQL
+
+# Segunda barrera: aunque el firewall fallara, PostgreSQL solo acepta al backend,
+# solo a esta base, solo a este usuario y siempre con contraseña.
+- name: Permitir solo al backend (pg_hba.conf)
+  ansible.builtin.blockinfile:
+    path: "{{ postgresql_hba }}"
+    marker: "# {mark} ANSIBLE: acceso del backend"
+    block: |
+      host    {{ db_nombre }}    {{ db_usuario }}    {{ ip_backend }}/32    scram-sha-256
+  notify: Recargar PostgreSQL
+
+- name: PostgreSQL iniciado y activo al arrancar
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Aplicar ahora los cambios de configuración
+  ansible.builtin.meta: flush_handlers
+
+# Se usa psql para no instalar librerías extra. Es idempotente: crea solo lo que falta
+# y siempre deja la contraseña igual a la de vault.yml.
+- name: Usuario y base de datos de la app
+  ansible.builtin.command:
+    cmd: psql -X -v ON_ERROR_STOP=1
+    chdir: /tmp
+    stdin: |
+      \set usuario '{{ db_usuario }}'
+      \set clave '{{ db_password }}'
+      \set base '{{ db_nombre }}'
+      SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'usuario', :'clave')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'usuario') \gexec
+      SELECT format('ALTER ROLE %I PASSWORD %L', :'usuario', :'clave') \gexec
+      SELECT format('CREATE DATABASE %I OWNER %I', :'base', :'usuario')
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'base') \gexec
+  become: true
+  become_user: postgres
+  register: postgresql_psql
+  changed_when: "'CREATE ROLE' in postgresql_psql.stdout or 'CREATE DATABASE' in postgresql_psql.stdout"
+  no_log: true # lleva la contraseña

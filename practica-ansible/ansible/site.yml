@@ -1,0 +1,66 @@
+# Configura los tres servidores que crea Terraform.
+#   ansible-playbook -i inventarios/aws.ini site.yml
+#   ansible-playbook -i inventarios/azure.ini site.yml
+# Se puede ejecutar todas las veces que quieran: solo cambia lo que hace falta.
+# Para desplegar una versión nueva de la app, basta con volver a ejecutarlo.
+
+- name: Esperar a que los servidores estén listos
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Esperar a que responda SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+    - name: Esperar a que termine el primer arranque (cloud-init)
+      ansible.builtin.command: cloud-init status --wait
+      register: estado_cloud_init
+      changed_when: false
+      failed_when: estado_cloud_init.rc not in [0, 2] # 2 = terminó con avisos
+
+    - name: Comprobar los secretos de Vault (solo letras y números)
+      ansible.builtin.assert:
+        that:
+          - item is regex('^[A-Za-z0-9]{12,}$')
+        fail_msg: >-
+          Revisa group_vars/all/vault.yml: cada secreto debe tener al menos
+          12 caracteres, solo letras y números.
+        quiet: true
+      loop: ["{{ db_password }}", "{{ jwt_secret }}", "{{ admin_password }}"]
+      no_log: true
+
+- name: Configuración común
+  hosts: all
+  become: true
+  roles:
+    - comun
+
+- name: Base de datos (PostgreSQL)
+  hosts: base
+  become: true
+  roles:
+    - postgresql
+
+- name: Backend (API NestJS)
+  hosts: backend
+  become: true
+  roles:
+    - nodejs
+    - codigo
+    - backend
+
+- name: Frontend (React + Nginx)
+  hosts: frontend
+  become: true
+  roles:
+    - nodejs
+    - codigo
+    - frontend
+
+- name: Resumen
+  hosts: frontend
+  gather_facts: false
+  tasks:
+    - name: Dirección de la app
+      ansible.builtin.debug:
+        msg: "Listo: {{ url_app }}  (usuario {{ admin_email }})"

@@ -1,0 +1,16 @@
+# Generado por Terraform (${nube}). No lo edites: se vuelve a escribir en cada apply.
+# ansible_host = IP pública (para entrar por SSH); ip_privada = la que usan los servidores entre sí.
+
+[frontend]
+vm-frontend ansible_host=${frontend.publica} ip_privada=${frontend.privada}
+
+[backend]
+vm-backend ansible_host=${backend.publica} ip_privada=${backend.privada}
+
+[base]
+vm-base ansible_host=${base.publica} ip_privada=${base.privada}
+
+[all:vars]
+ansible_user=${usuario}
+nube=${nube}
+url_app=http://${frontend.publica}

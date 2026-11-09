@@ -1,0 +1,4 @@
+# Amazon Linux 2023
+postgresql_paquetes: [postgresql16-server]
+postgresql_conf: /var/lib/pgsql/data/postgresql.conf
+postgresql_hba: /var/lib/pgsql/data/pg_hba.conf

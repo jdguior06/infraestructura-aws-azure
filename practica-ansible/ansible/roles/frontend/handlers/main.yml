@@ -1,0 +1,4 @@
+- name: Recargar Nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: reloaded

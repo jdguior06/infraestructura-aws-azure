@@ -28,3 +28,8 @@ tfplan.json
 # Pulumi (TypeScript)
 node_modules/
 bin/
+
+# Ansible (practica-ansible): inventarios generados por Terraform y archivos de reintento
+practica-ansible/ansible/inventarios/*.ini
+!practica-ansible/ansible/inventarios/ejemplo.ini
+*.retry

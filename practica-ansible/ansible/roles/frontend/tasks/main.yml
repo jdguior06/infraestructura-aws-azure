@@ -1,0 +1,109 @@
+# React (Vite) compilado y servido con Nginx, con proxy de /api al backend.
+# Requiere que antes corran los roles nodejs y codigo (codigo_git).
+
+- name: Variables de compilación (.env del cliente)
+  ansible.builtin.copy:
+    dest: "{{ app_dir }}/client/.env"
+    content: "VITE_API_URL=/api\n" # relativa: el navegador habla solo con Nginx
+    owner: "{{ app_usuario }}"
+    group: "{{ app_usuario }}"
+    mode: "0644"
+  register: frontend_env
+
+- name: Comprobar si ya está compilado
+  ansible.builtin.stat:
+    path: "{{ app_dir }}/client/dist/index.html"
+  register: frontend_compilado
+
+- name: Instalar dependencias y compilar (solo si cambió algo)
+  when: codigo_git is changed or frontend_env is changed or not frontend_compilado.stat.exists
+  become: true
+  become_user: "{{ app_usuario }}"
+  environment:
+    NODE_OPTIONS: --max-old-space-size=1536
+  block:
+    - name: Instalar dependencias (npm ci)
+      ansible.builtin.command:
+        cmd: npm ci --no-audit --no-fund
+        chdir: "{{ app_dir }}/client"
+      changed_when: true
+
+    - name: Compilar (npm run build)
+      ansible.builtin.command:
+        cmd: npm run build
+        chdir: "{{ app_dir }}/client"
+      changed_when: true
+
+- name: Instalar Nginx (Ubuntu)
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    lock_timeout: 600
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Instalar Nginx (Amazon Linux)
+  ansible.builtin.dnf:
+    name: nginx
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Carpeta pública
+  ansible.builtin.file:
+    path: /var/www/asistencia
+    state: directory
+    mode: "0755"
+
+- name: Publicar la app compilada
+  ansible.builtin.copy:
+    src: "{{ app_dir }}/client/dist/"
+    dest: /var/www/asistencia/
+    remote_src: true
+    mode: preserve
+  notify: Recargar Nginx
+
+- name: Configuración del sitio
+  ansible.builtin.template:
+    src: nginx-app.conf.j2
+    dest: /etc/nginx/conf.d/asistencia.conf
+    mode: "0644"
+  notify: Recargar Nginx
+
+# Cada sistema trae un sitio de ejemplo en el puerto 80: que el nuestro sea el principal.
+- name: Quitar el sitio de ejemplo (Ubuntu)
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  when: ansible_facts['os_family'] == 'Debian'
+  notify: Recargar Nginx
+
+- name: Quitar default_server del sitio de ejemplo (Amazon Linux)
+  ansible.builtin.replace:
+    path: /etc/nginx/nginx.conf
+    regexp: '\s+default_server'
+    replace: ''
+  when: ansible_facts['os_family'] == 'RedHat'
+  notify: Recargar Nginx
+
+- name: Probar la configuración de Nginx
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Nginx activo al arrancar
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: true
+
+- name: Aplicar ahora los cambios de Nginx
+  ansible.builtin.meta: flush_handlers
+
+- name: Comprobar la página
+  ansible.builtin.uri:
+    url: http://127.0.0.1/
+    status_code: 200
+
+# 502 o 504 = Nginx no llega al backend (firewall, IP o API caída).
+- name: Comprobar que Nginx llega a la API por la red privada
+  ansible.builtin.uri:
+    url: http://127.0.0.1/api/
+    status_code: [200, 401, 404]

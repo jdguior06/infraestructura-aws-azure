@@ -1,0 +1,32 @@
+# Variables de toda la práctica. Los secretos están en vault.yml (cifrado).
+
+# ---------------------------------------------------------------- App
+app_repo: https://github.com/Jorgito-cc/control-asistencia-academica.git
+app_rama: main
+app_usuario: asistencia                  # usuario del sistema que ejecuta la app (no root)
+app_home: /opt/asistencia
+app_dir: /opt/asistencia/app             # aquí se clona el repositorio
+node_version_mayor: 22
+
+# ---------------------------------------------------------------- API
+puerto_api: 3000
+jwt_expira: 8h
+zona_horaria: America/La_Paz
+admin_nombre: Administrador
+admin_email: admin@example.com
+
+# ---------------------------------------------------------------- Base de datos
+db_nombre: modulo2
+db_usuario: asistencia
+db_puerto: 5432
+
+# ---------------------------------------------------------------- Secretos (de vault.yml)
+db_password: "{{ vault_db_password }}"
+jwt_secret: "{{ vault_jwt_secret }}"
+admin_password: "{{ vault_admin_password }}"
+
+# ---------------------------------------------------------------- Dónde está cada servidor
+# Salen del inventario que genera Terraform.
+ip_backend: "{{ hostvars[groups['backend'][0]]['ip_privada'] }}"
+ip_base: "{{ hostvars[groups['base'][0]]['ip_privada'] }}"
+ip_publica_frontend: "{{ hostvars[groups['frontend'][0]]['ansible_host'] }}"

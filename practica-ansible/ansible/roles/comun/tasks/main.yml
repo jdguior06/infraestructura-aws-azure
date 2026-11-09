@@ -1,0 +1,16 @@
+# Lo que necesitan los tres servidores.
+
+- name: Paquetes básicos (Ubuntu)
+  ansible.builtin.apt:
+    name: [git, acl]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 600 # espera si Ubuntu está actualizándose solo
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Paquetes básicos (Amazon Linux)
+  ansible.builtin.dnf:
+    name: [git, acl]
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'

@@ -1,0 +1,11 @@
+# Plantilla de los secretos. NO subas este archivo con valores reales.
+#
+#   cp group_vars/all/vault.yml.ejemplo group_vars/all/vault.yml
+#   (cambia los valores: solo letras y números)
+#   ansible-vault encrypt group_vars/all/vault.yml
+#
+# vault.yml cifrado SÍ se sube al repo: sin la contraseña de Vault nadie puede leerlo.
+
+vault_db_password: CambiaEstaClaveDeLaBase123
+vault_jwt_secret: CambiaEsteSecretoJwtLargoDeAlMenos32Caracteres
+vault_admin_password: CambiaLaClaveDelAdmin123

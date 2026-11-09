@@ -1,0 +1,24 @@
+# Usuario de la app y código desde GitHub. Lo usan frontend y backend.
+# Deja registrado "codigo_git": si cambió, hay que recompilar.
+
+- name: Usuario del sistema para la app (sin acceso por SSH)
+  ansible.builtin.user:
+    name: "{{ app_usuario }}"
+    system: true
+    home: "{{ app_home }}"
+    create_home: true
+    shell: /sbin/nologin
+
+- name: Clonar o actualizar el repositorio de la app
+  ansible.builtin.git:
+    repo: "{{ app_repo }}"
+    dest: "{{ app_dir }}"
+    version: "{{ app_rama }}"
+    depth: 1
+  become: true
+  become_user: "{{ app_usuario }}"
+  register: codigo_git
+
+- name: Versión desplegada
+  ansible.builtin.debug:
+    msg: "Commit {{ codigo_git.after[:7] }}{{ ' (nuevo)' if codigo_git is changed else ' (sin cambios)' }}"

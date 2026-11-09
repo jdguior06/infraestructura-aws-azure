@@ -1,0 +1,74 @@
+# API NestJS: .env, compilación, migraciones y servicio systemd.
+# Requiere que antes corran los roles nodejs y codigo (codigo_git).
+
+- name: Variables de entorno de la API (.env)
+  ansible.builtin.template:
+    src: backend.env.j2
+    dest: "{{ app_dir }}/server/.env"
+    owner: "{{ app_usuario }}"
+    group: "{{ app_usuario }}"
+    mode: "0600"
+  notify: Reiniciar API
+
+- name: Comprobar si ya está compilada
+  ansible.builtin.stat:
+    path: "{{ app_dir }}/server/dist/main.js"
+  register: backend_compilado
+
+- name: Instalar dependencias y compilar (solo si cambió el código)
+  when: codigo_git is changed or not backend_compilado.stat.exists
+  become: true
+  become_user: "{{ app_usuario }}"
+  environment:
+    NODE_OPTIONS: --max-old-space-size=1536
+  block:
+    # Con las de desarrollo: migration:run usa ts-node.
+    - name: Instalar dependencias (npm ci)
+      ansible.builtin.command:
+        cmd: npm ci --no-audit --no-fund
+        chdir: "{{ app_dir }}/server"
+      changed_when: true
+
+    - name: Compilar (npm run build)
+      ansible.builtin.command:
+        cmd: npm run build
+        chdir: "{{ app_dir }}/server"
+      changed_when: true
+      notify: Reiniciar API
+
+# TypeORM recuerda qué migraciones ya aplicó: se puede ejecutar siempre.
+# Además comprueba que el backend llega a la base de datos.
+- name: Migraciones de la base de datos
+  ansible.builtin.command:
+    cmd: npm run migration:run
+    chdir: "{{ app_dir }}/server"
+  become: true
+  become_user: "{{ app_usuario }}"
+  register: backend_migraciones
+  changed_when: "'No migrations are pending' not in backend_migraciones.stdout"
+
+- name: Servicio systemd de la API
+  ansible.builtin.template:
+    src: asistencia-api.service.j2
+    dest: /etc/systemd/system/asistencia-api.service
+    mode: "0644"
+  notify: Reiniciar API
+
+- name: API activa al arrancar
+  ansible.builtin.systemd:
+    name: asistencia-api
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Aplicar ahora los reinicios pendientes
+  ansible.builtin.meta: flush_handlers
+
+- name: Comprobar que la API responde
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ puerto_api }}/api"
+    status_code: [200, 401, 404] # cualquier respuesta de NestJS sirve
+  register: backend_respuesta
+  until: backend_respuesta.status in [200, 401, 404]
+  retries: 20
+  delay: 5

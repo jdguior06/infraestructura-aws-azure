@@ -1,0 +1,2 @@
+# Ubuntu 24.04: las rutas llevan la versión (/etc/postgresql/16/main); se detecta en tasks.
+postgresql_paquetes: [postgresql]
