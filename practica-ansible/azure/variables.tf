@@ -33,9 +33,9 @@ variable "tamano" {
   description = "Tamaño de cada VM. En westus2 puedes usar Standard_B2ats_v2, más barato."
   type        = map(string)
   default = {
-    frontend = "Standard_D2as_v4"
-    backend  = "Standard_D2as_v4"
-    base     = "Standard_D2as_v4"
+    frontend = "Standard_B1ms"
+    backend  = "Standard_B1ms"
+    base     = "Standard_B2s"
   }
 }
 

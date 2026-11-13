@@ -1,5 +1,4 @@
 # Inventario de Ansible: Terraform lo escribe con las IPs de cada servidor.
-# Queda en ../ansible/inventarios/azure.ini (no se sube a git: lo genera cada uno).
 
 resource "local_file" "inventario_ansible" {
   filename        = "${path.module}/../ansible/inventarios/azure.ini"
